@@ -18,7 +18,13 @@
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "test:coverage": "react-scripts test --coverage --watchAll=false",
+    "eject": "react-scripts eject",
+    "lint": "eslint src/**/*.js",
+    "lint:fix": "eslint src/**/*.js --fix",
+    "format": "prettier --write src/**/*.{js,jsx,css,md}",
+    "analyze": "npm run build && npx bundle-analyzer build/static/js/*.js",
+    "serve": "serve -s build -l 3000"
   },
   "eslintConfig": {
     "extends": [
