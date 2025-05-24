@@ -1,0 +1,213 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  NODE_VERSION: '18'
+
+jobs:
+  # Create Release
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Generate changelog from git commits
+        echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+        git log --pretty=format:"- %s (%h)" $(git describe --tags --abbrev=0 HEAD^)..HEAD >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        
+    - name: Create Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        body: |
+          ## Changes in this Release
+          ${{ steps.changelog.outputs.CHANGELOG }}
+          
+          ## Installation
+          
+          ### Smart Contracts
+          ```bash
+          cd blockchain-real-estate
+          npm install
+          npm run compile
+          npm run deploy:testnet -- --network goerli
+          ```
+          
+          ### Frontend
+          ```bash
+          cd frontend
+          npm install
+          npm run build
+          ```
+          
+          ## Documentation
+          - [Installation Guide](INSTALLATION.md)
+          - [API Documentation](API.md)
+          - [Security Guidelines](SECURITY.md)
+          - [Contributing Guidelines](CONTRIBUTING.md)
+        draft: false
+        prerelease: false
+
+  # Deploy to Production
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [create-release]
+    environment: production
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        
+    - name: Install smart contract dependencies
+      working-directory: ./blockchain-real-estate
+      run: npm ci
+      
+    - name: Install frontend dependencies
+      working-directory: ./frontend
+      run: npm ci
+      
+    - name: Build frontend
+      working-directory: ./frontend
+      run: npm run build
+      env:
+        REACT_APP_NETWORK_NAME: mainnet
+        REACT_APP_PROPERTY_REGISTRY_ADDRESS: ${{ secrets.PROD_PROPERTY_REGISTRY_ADDRESS }}
+        REACT_APP_PROPERTY_TOKEN_ADDRESS: ${{ secrets.PROD_PROPERTY_TOKEN_ADDRESS }}
+        REACT_APP_PROPERTY_TRANSACTIONS_ADDRESS: ${{ secrets.PROD_PROPERTY_TRANSACTIONS_ADDRESS }}
+        
+    - name: Deploy contracts to mainnet
+      working-directory: ./blockchain-real-estate
+      run: |
+        echo "⚠️  MAINNET DEPLOYMENT - PROCEED WITH CAUTION ⚠️"
+        # Uncomment the line below for actual mainnet deployment
+        # npm run deploy:testnet -- --network mainnet
+      env:
+        MAINNET_PRIVATE_KEY: ${{ secrets.MAINNET_PRIVATE_KEY }}
+        INFURA_PROJECT_ID: ${{ secrets.INFURA_PROJECT_ID }}
+        ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+        
+    - name: Verify contracts on mainnet
+      working-directory: ./blockchain-real-estate
+      run: |
+        # Uncomment the line below for actual verification
+        # npm run verify -- --network mainnet
+      env:
+        ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+
+  # Build and Upload Artifacts
+  build-artifacts:
+    name: Build and Upload Artifacts
+    runs-on: ubuntu-latest
+    needs: [create-release]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        
+    - name: Install and build smart contracts
+      working-directory: ./blockchain-real-estate
+      run: |
+        npm ci
+        npm run compile
+        
+    - name: Install and build frontend
+      working-directory: ./frontend
+      run: |
+        npm ci
+        npm run build
+        
+    - name: Create artifacts
+      run: |
+        mkdir -p artifacts
+        
+        # Smart contract artifacts
+        cp -r blockchain-real-estate/artifacts artifacts/contracts
+        cp -r blockchain-real-estate/deployments artifacts/ 2>/dev/null || true
+        
+        # Frontend build
+        cp -r frontend/build artifacts/frontend
+        
+        # Documentation
+        cp *.md artifacts/
+        
+        # Create archive
+        tar -czf blockchain-real-estate-${{ github.ref_name }}.tar.gz artifacts/
+        
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ./blockchain-real-estate-${{ github.ref_name }}.tar.gz
+        asset_name: blockchain-real-estate-${{ github.ref_name }}.tar.gz
+        asset_content_type: application/gzip
+
+  # Security Scan
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  # Notify
+  notify:
+    name: Notify Release
+    runs-on: ubuntu-latest
+    needs: [deploy-production, build-artifacts]
+    if: always()
+    
+    steps:
+    - name: Notify success
+      if: needs.deploy-production.result == 'success' && needs.build-artifacts.result == 'success'
+      run: |
+        echo "🎉 Release ${{ github.ref_name }} deployed successfully!"
+        # Add notification logic here (Slack, Discord, email, etc.)
+        
+    - name: Notify failure
+      if: needs.deploy-production.result == 'failure' || needs.build-artifacts.result == 'failure'
+      run: |
+        echo "❌ Release ${{ github.ref_name }} deployment failed!"
+        # Add notification logic here (Slack, Discord, email, etc.)

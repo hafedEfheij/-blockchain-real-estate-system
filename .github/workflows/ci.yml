@@ -1,0 +1,255 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ master, develop ]
+  pull_request:
+    branches: [ master, develop ]
+
+env:
+  NODE_VERSION: '18'
+  CACHE_KEY_PREFIX: 'node-cache'
+
+jobs:
+  # Smart Contract Testing
+  smart-contract-tests:
+    name: Smart Contract Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: blockchain-real-estate/package-lock.json
+        
+    - name: Install dependencies
+      working-directory: ./blockchain-real-estate
+      run: npm ci
+      
+    - name: Compile contracts
+      working-directory: ./blockchain-real-estate
+      run: npm run compile
+      
+    - name: Run tests
+      working-directory: ./blockchain-real-estate
+      run: npm run test
+      
+    - name: Generate coverage report
+      working-directory: ./blockchain-real-estate
+      run: npm run test:coverage
+      
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./blockchain-real-estate/coverage/lcov.info
+        flags: smart-contracts
+        name: smart-contract-coverage
+
+  # Frontend Testing
+  frontend-tests:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+        
+    - name: Install dependencies
+      working-directory: ./frontend
+      run: npm ci
+      
+    - name: Run linting
+      working-directory: ./frontend
+      run: npm run lint
+      
+    - name: Run tests
+      working-directory: ./frontend
+      run: npm run test:coverage
+      env:
+        CI: true
+        
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./frontend/coverage/lcov.info
+        flags: frontend
+        name: frontend-coverage
+
+  # Security Audit
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        
+    - name: Audit smart contract dependencies
+      working-directory: ./blockchain-real-estate
+      run: |
+        npm ci
+        npm audit --audit-level moderate
+        
+    - name: Audit frontend dependencies
+      working-directory: ./frontend
+      run: |
+        npm ci
+        npm audit --audit-level moderate
+
+  # Build and Deploy
+  build-and-deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    needs: [smart-contract-tests, frontend-tests, security-audit]
+    if: github.ref == 'refs/heads/master'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+        
+    - name: Install frontend dependencies
+      working-directory: ./frontend
+      run: npm ci
+      
+    - name: Build frontend
+      working-directory: ./frontend
+      run: npm run build
+      env:
+        REACT_APP_NETWORK_NAME: ${{ secrets.REACT_APP_NETWORK_NAME }}
+        REACT_APP_PROPERTY_REGISTRY_ADDRESS: ${{ secrets.REACT_APP_PROPERTY_REGISTRY_ADDRESS }}
+        REACT_APP_PROPERTY_TOKEN_ADDRESS: ${{ secrets.REACT_APP_PROPERTY_TOKEN_ADDRESS }}
+        REACT_APP_PROPERTY_TRANSACTIONS_ADDRESS: ${{ secrets.REACT_APP_PROPERTY_TRANSACTIONS_ADDRESS }}
+        
+    - name: Deploy to staging
+      if: github.ref == 'refs/heads/develop'
+      run: |
+        echo "Deploying to staging environment..."
+        # Add your staging deployment commands here
+        
+    - name: Deploy to production
+      if: github.ref == 'refs/heads/master'
+      run: |
+        echo "Deploying to production environment..."
+        # Add your production deployment commands here
+
+  # Contract Deployment (Testnet)
+  deploy-contracts-testnet:
+    name: Deploy Contracts to Testnet
+    runs-on: ubuntu-latest
+    needs: [smart-contract-tests]
+    if: github.ref == 'refs/heads/develop'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: blockchain-real-estate/package-lock.json
+        
+    - name: Install dependencies
+      working-directory: ./blockchain-real-estate
+      run: npm ci
+      
+    - name: Deploy to Goerli testnet
+      working-directory: ./blockchain-real-estate
+      run: npm run deploy:testnet -- --network goerli
+      env:
+        PRIVATE_KEY: ${{ secrets.TESTNET_PRIVATE_KEY }}
+        INFURA_PROJECT_ID: ${{ secrets.INFURA_PROJECT_ID }}
+        ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+        
+    - name: Verify contracts
+      working-directory: ./blockchain-real-estate
+      run: npm run verify -- --network goerli
+      env:
+        ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+
+  # Performance Testing
+  performance-tests:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    needs: [frontend-tests]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+        
+    - name: Install dependencies
+      working-directory: ./frontend
+      run: npm ci
+      
+    - name: Build application
+      working-directory: ./frontend
+      run: npm run build
+      
+    - name: Run Lighthouse CI
+      uses: treosh/lighthouse-ci-action@v10
+      with:
+        configPath: './frontend/lighthouserc.json'
+        uploadArtifacts: true
+        temporaryPublicStorage: true
+
+  # Documentation
+  documentation:
+    name: Generate Documentation
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        
+    - name: Install dependencies
+      working-directory: ./blockchain-real-estate
+      run: npm ci
+      
+    - name: Generate contract documentation
+      working-directory: ./blockchain-real-estate
+      run: |
+        npx hardhat docgen
+        
+    - name: Deploy documentation
+      if: github.ref == 'refs/heads/master'
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./docs
