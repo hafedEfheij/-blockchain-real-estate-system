@@ -10,21 +10,48 @@ const PROPERTY_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000";
 const PROPERTY_TRANSACTIONS_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 // Initialize Web3Modal
-const providerOptions = {};
+const providerOptions = {
+  // Add provider options here if needed
+  // For most users, MetaMask will be detected automatically
+};
+
 const web3Modal = new Web3Modal({
   network: "localhost", // Change to the appropriate network
   cacheProvider: true,
-  providerOptions
+  providerOptions,
+  disableInjectedProvider: false, // This ensures MetaMask is detected
 });
 
 // Connect to wallet
 export const connectWallet = async () => {
   try {
+    // Check if MetaMask is installed
+    if (!window.ethereum) {
+      alert("Please install MetaMask to use this application!");
+      throw new Error("MetaMask not installed");
+    }
+
+    // Connect to the wallet
     const instance = await web3Modal.connect();
+
+    // Handle connection events
+    instance.on("accountsChanged", (accounts) => {
+      window.location.reload();
+    });
+
+    instance.on("chainChanged", (chainId) => {
+      window.location.reload();
+    });
+
+    // Get provider and signer
     const provider = new ethers.providers.Web3Provider(instance);
     const signer = provider.getSigner();
     const address = await signer.getAddress();
-    
+
+    // Check if we're on the correct network (localhost/Hardhat)
+    const network = await provider.getNetwork();
+    console.log("Connected to network:", network);
+
     return {
       provider,
       signer,
@@ -32,6 +59,14 @@ export const connectWallet = async () => {
     };
   } catch (error) {
     console.error("Error connecting to wallet:", error);
+
+    // Provide more user-friendly error messages
+    if (error.code === 4001) {
+      alert("Connection rejected. Please connect your wallet to use this application.");
+    } else {
+      alert("Error connecting to wallet. Please make sure MetaMask is installed and unlocked.");
+    }
+
     throw error;
   }
 };
@@ -44,19 +79,19 @@ export const getContracts = async (signer) => {
       PropertyRegistryABI.abi,
       signer
     );
-    
+
     const propertyToken = new ethers.Contract(
       PROPERTY_TOKEN_ADDRESS,
       PropertyTokenABI.abi,
       signer
     );
-    
+
     const propertyTransactions = new ethers.Contract(
       PROPERTY_TRANSACTIONS_ADDRESS,
       PropertyTransactionsABI.abi,
       signer
     );
-    
+
     return {
       propertyRegistry,
       propertyToken,
@@ -72,7 +107,7 @@ export const getContracts = async (signer) => {
 export const registerProperty = async (signer, propertyData) => {
   try {
     const { propertyRegistry } = await getContracts(signer);
-    
+
     const tx = await propertyRegistry.registerProperty(
       propertyData.location,
       propertyData.area,
@@ -81,13 +116,13 @@ export const registerProperty = async (signer, propertyData) => {
       ethers.utils.parseEther(propertyData.price.toString()),
       propertyData.forSale
     );
-    
+
     const receipt = await tx.wait();
-    
+
     // Find the PropertyRegistered event
     const event = receipt.events.find(event => event.event === 'PropertyRegistered');
     const propertyId = event.args.propertyId;
-    
+
     return propertyId;
   } catch (error) {
     console.error("Error registering property:", error);
@@ -100,7 +135,7 @@ export const getProperty = async (signer, propertyId) => {
   try {
     const { propertyRegistry } = await getContracts(signer);
     const property = await propertyRegistry.getProperty(propertyId);
-    
+
     return {
       id: property.id.toString(),
       location: property.location,
@@ -123,11 +158,11 @@ export const getPropertiesForSale = async (signer) => {
   try {
     const { propertyRegistry } = await getContracts(signer);
     const propertyIds = await propertyRegistry.getPropertiesForSale();
-    
+
     const properties = await Promise.all(
       propertyIds.map(id => getProperty(signer, id))
     );
-    
+
     return properties;
   } catch (error) {
     console.error("Error getting properties for sale:", error);
@@ -141,11 +176,11 @@ export const getMyProperties = async (signer) => {
     const { propertyRegistry } = await getContracts(signer);
     const address = await signer.getAddress();
     const propertyIds = await propertyRegistry.getPropertiesByOwner(address);
-    
+
     const properties = await Promise.all(
       propertyIds.map(id => getProperty(signer, id))
     );
-    
+
     return properties;
   } catch (error) {
     console.error("Error getting my properties:", error);
@@ -157,14 +192,14 @@ export const getMyProperties = async (signer) => {
 export const tokenizeProperty = async (signer, propertyId, metadataURI) => {
   try {
     const { propertyToken } = await getContracts(signer);
-    
+
     const tx = await propertyToken.tokenizeProperty(propertyId, metadataURI);
     const receipt = await tx.wait();
-    
+
     // Find the PropertyTokenized event
     const event = receipt.events.find(event => event.event === 'PropertyTokenized');
     const tokenId = event.args.tokenId;
-    
+
     return tokenId;
   } catch (error) {
     console.error("Error tokenizing property:", error);
@@ -176,18 +211,18 @@ export const tokenizeProperty = async (signer, propertyId, metadataURI) => {
 export const createTransaction = async (signer, propertyId, price) => {
   try {
     const { propertyTransactions } = await getContracts(signer);
-    
+
     const tx = await propertyTransactions.createTransaction(
       propertyId,
       { value: ethers.utils.parseEther(price.toString()) }
     );
-    
+
     const receipt = await tx.wait();
-    
+
     // Find the TransactionCreated event
     const event = receipt.events.find(event => event.event === 'TransactionCreated');
     const transactionId = event.args.transactionId;
-    
+
     return transactionId;
   } catch (error) {
     console.error("Error creating transaction:", error);
@@ -201,7 +236,7 @@ export const getTransaction = async (signer, transactionId) => {
     const { propertyTransactions } = await getContracts(signer);
     const transaction = await propertyTransactions.getTransaction(transactionId);
     const status = await propertyTransactions.getTransactionStatus(transactionId);
-    
+
     return {
       id: transaction.id.toString(),
       propertyId: transaction.propertyId.toString(),
@@ -224,11 +259,11 @@ export const getMyTransactionsAsBuyer = async (signer) => {
     const { propertyTransactions } = await getContracts(signer);
     const address = await signer.getAddress();
     const transactionIds = await propertyTransactions.getTransactionsByBuyer(address);
-    
+
     const transactions = await Promise.all(
       transactionIds.map(id => getTransaction(signer, id))
     );
-    
+
     return transactions;
   } catch (error) {
     console.error("Error getting my transactions as buyer:", error);
@@ -242,11 +277,11 @@ export const getMyTransactionsAsSeller = async (signer) => {
     const { propertyTransactions } = await getContracts(signer);
     const address = await signer.getAddress();
     const transactionIds = await propertyTransactions.getTransactionsBySeller(address);
-    
+
     const transactions = await Promise.all(
       transactionIds.map(id => getTransaction(signer, id))
     );
-    
+
     return transactions;
   } catch (error) {
     console.error("Error getting my transactions as seller:", error);
