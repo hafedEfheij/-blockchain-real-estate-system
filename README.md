@@ -9,11 +9,7 @@
 A comprehensive decentralized application for property registration, verification, tokenization, and transactions using blockchain technology. This system provides a secure, transparent, and efficient way to manage real estate transactions on the blockchain.
 ## ✨ Features
 
-### 🏘️ Property Management
-- **Property Registration**: Register properties with detailed information and documents
-- **Property Verification**: Authorized verifiers can verify property authenticity
-- **Property Search & Filtering**: Advanced search with multiple filters and sorting options
-- **Property Analytics**: Comprehensive dashboard with market statistics and trends
+
 
 ### 🎨 NFT Tokenization
 - **Property Tokenization**: Convert properties into ERC-721 NFTs
