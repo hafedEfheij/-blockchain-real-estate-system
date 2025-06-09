@@ -6,7 +6,7 @@
 [![React](https://img.shields.io/badge/React-18.0+-blue.svg)](https://reactjs.org/)
 
 
-A comprehensive decentralized application for property registration, verification, tokenization, and transactions using blockchain technology. This system provides a secure, transparent, and efficient way to manage real estate transactions on the blockchain.
+.
 ## ✨ Features
 
 ### 🏘️ Property Management
